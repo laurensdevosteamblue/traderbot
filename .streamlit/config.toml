@@ -1,0 +1,8 @@
+[server]
+# Never expose the dashboard publicly. On a VPS use: ssh -L 8501:localhost:8501 user@vps
+address = "127.0.0.1"
+port = 8501
+headless = true
+
+[browser]
+gatherUsageStats = false

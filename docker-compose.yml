@@ -1,0 +1,43 @@
+name: traderbot
+
+x-common: &common
+  build: .
+  image: traderbot:latest
+  restart: unless-stopped
+  user: "1000:1000"
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+services:
+  bot:
+    <<: *common
+    command: ["python", "-m", "traderbot", "run"]
+    # Only the bot gets secrets (.env). For mode = "live" add "--confirm-live" to the command.
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./config.toml:/app/config.toml:ro
+      - ./state:/app/state
+      - ./data:/app/data
+    mem_limit: 512m
+
+  dashboard:
+    <<: *common
+    # Read-only: no secrets, state mounted read-only. Reachable on the LAN at http://<pi-ip>:8501.
+    # Do NOT publish it to the internet (e.g. via nginx-proxy-manager).
+    command: ["python", "-m", "streamlit", "run", "traderbot/dashboard.py",
+              "--server.address", "0.0.0.0", "--server.port", "8501"]
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./config.toml:/app/config.toml:ro
+      - ./state:/app/state:ro
+      - ./data:/app/data
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=5)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3

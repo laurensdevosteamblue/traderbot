@@ -1,0 +1,25 @@
+# Install on the VPS:
+#   sudo cp deploy/traderbot.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now traderbot
+#   journalctl -u traderbot -f
+[Unit]
+Description=traderbot (crypto spot trading bot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=traderbot
+WorkingDirectory=/opt/traderbot
+EnvironmentFile=/opt/traderbot/.env
+# For mode = "live" append --confirm-live
+ExecStart=/opt/traderbot/.venv/bin/python -m traderbot run
+Restart=on-failure
+RestartSec=60
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/traderbot/state /opt/traderbot/data
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
