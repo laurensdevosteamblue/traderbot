@@ -43,10 +43,17 @@ class Runner:
         if candles.empty:
             raise RuntimeError(f"no closed candles returned for {c.symbol} {c.timeframe}")
         target = float(self.strategy(candles, **c.params).iloc[-1])
+        self.entry_level = float(candles.high.rolling(c.params["entry"]).max().iloc[-1]) \
+            if c.strategy == "donchian_breakout" and "entry" in c.params else None
+        self.exit_level = float(candles.low.rolling(c.params["exit"]).min().iloc[-1]) \
+            if c.strategy == "donchian_breakout" and "exit" in c.params else None
         weight = 1.0
         if c.vol_target > 0:
-            vol = realized_vol(candles, c.timeframe, c.vol_lookback_days).iloc[-1]
+            vol = float(realized_vol(candles, c.timeframe, c.vol_lookback_days).iloc[-1])
+            self.realized_vol = vol
             weight = min(1.0, c.vol_target / vol) if vol > 0 else 1.0
+        else:
+            self.realized_vol = None
         return target, weight
 
     def step(self, candles: pd.DataFrame | None = None) -> str:
@@ -81,6 +88,9 @@ class Runner:
         self.status.write_text(json.dumps({**row, "name": c.name, "mode": c.mode, "symbol": c.symbol,
                                            "timeframe": c.timeframe, "strategy": c.strategy, "params": c.params,
                                            "entry_size_weight": getattr(self, "weight", None),
+                                           "realized_vol": getattr(self, "realized_vol", None),
+                                           "entry_level": getattr(self, "entry_level", None),
+                                           "exit_level": getattr(self, "exit_level", None),
                                            "order_type": c.order_type, "vol_target": c.vol_target,
                                            "kill_switch": self.risk.killed(), "risk": asdict(self.risk.state)},
                                           indent=2))

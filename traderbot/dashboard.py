@@ -123,10 +123,10 @@ overview_tab, live_tab, rec_tab, bt_tab, cmp_tab, wf_tab = st.tabs(
 
 @st.fragment(run_every="60s")
 def render_overview(bots: list[Config]) -> None:
-    rows, curves = [], {}
+    rows, curves, journals = [], {}, []
     now = pd.Timestamp.now(tz="UTC")
     for b in bots:
-        _, session_p, status_p, equity_p = state_paths(b)
+        journal_p, session_p, status_p, equity_p = state_paths(b)
         if not status_p.exists():
             rows.append({"bot": b.name, "symbol": b.symbol, "status": "not started"})
             continue
@@ -134,39 +134,68 @@ def render_overview(bots: list[Config]) -> None:
         start = (json.loads(session_p.read_text()) if session_p.exists() else {}).get("start_equity") or b.budget_quote
         age = now - pd.Timestamp(s["time"])
         stale = age > pd.Timedelta(seconds=timeframe_seconds(b.timeframe)) + pd.Timedelta(minutes=10)
+        entry_lvl, exit_lvl, price = s.get("entry_level"), s.get("exit_level"), s["price"]
         rows.append({
             "bot": b.name, "symbol": b.symbol,
             "status": "KILL SWITCH" if s.get("kill_switch") else ("STALE" if stale else "ok"),
             "signal": {1.0: "LONG", 0.0: "FLAT"}.get(s["target"], "-"), "last_action": s["action"],
-            "price": fmt_price(s["price"]), "position": s["base"] * s["price"], "equity": s["equity"],
-            "start": start, "return": s["equity"] / start - 1,
+            "vol_weight": s.get("entry_size_weight"),
+            "price": fmt_price(price),
+            "buy_trigger": f"{fmt_price(entry_lvl)} ({entry_lvl / price - 1:+.1%})" if entry_lvl and price else "-",
+            "sell_stop": f"{fmt_price(exit_lvl)} ({exit_lvl / price - 1:+.1%})" if exit_lvl and price else "-",
+            "position": s["base"] * price, "cash": s["quote"], "equity": s["equity"],
+            "start": start, "pnl": s["equity"] - start, "return": s["equity"] / start - 1,
             "updated_min_ago": round(age.total_seconds() / 60),
         })
         eq = read_csv(equity_p, parse_dates=["time"])
         if eq is not None and len(eq):
             curves[b.name] = eq.set_index("time").equity
+        j = read_csv(journal_p, parse_dates=["time"])
+        if j is not None and len(j):
+            journals.append(j.assign(bot=b.name))
     table = pd.DataFrame(rows)
     if "equity" not in table:
         st.info("No bots have run yet. Start them with `python -m traderbot run`.")
         return
     running = table.dropna(subset=["equity"])
     total, start = running.equity.sum(), running.start.sum()
-    c = st.columns(4)
-    c[0].metric("Total equity (all bots)", f"{total:,.2f}", f"{total / start - 1:+.2%} since start")
+    pos_total, cash_total = running.position.sum(), running.cash.sum()
+    tf_sec = timeframe_seconds(bots[0].timeframe)
+    next_step_min = max(0.0, (tf_sec - now.timestamp() % tf_sec + 15) / 60)
+    c = st.columns(6)
+    c[0].metric("Total equity", f"{total:,.2f}", f"{total - start:+,.2f} ({total / start - 1:+.2%})")
     c[1].metric("Started with", f"{start:,.2f}")
-    c[2].metric("Bots in a position", f"{(running.signal == 'LONG').sum()} / {len(running)}")
-    c[3].metric("Problems", int((table.status != "ok").sum()), delta_color="off")
+    c[2].metric("Deployed / cash", f"{pos_total:,.2f}", f"{cash_total:,.2f} cash ({pos_total / total:.0%} deployed)" if total else "-", delta_color="off")
+    c[3].metric("Bots LONG", f"{(running.signal == 'LONG').sum()} / {len(running)}")
+    c[4].metric("Next candle check", f"in {next_step_min:.0f} min")
+    c[5].metric("Problems", int((table.status != "ok").sum()), delta_color="off")
     for _, r in table[table.status != "ok"].iterrows():
         st.warning(f"{r.bot} ({r.symbol}): {r.status}")
     st.dataframe(table, hide_index=True, width="stretch",
-                 column_config={"return": PCT, "equity": NUM, "position": NUM, "start": NUM})
+                 column_config={"return": PCT, "vol_weight": PCT, "equity": NUM, "position": NUM,
+                                "cash": NUM, "start": NUM, "pnl": NUM})
     if curves:
-        fig = go.Figure()
-        for name, eq in curves.items():
-            fig.add_scatter(x=eq.index, y=eq / eq.iloc[0] - 1, name=name)
-        fig.update_layout(height=380, margin={"t": 30, "b": 10}, legend={"orientation": "h"},
-                          yaxis={"tickformat": ".1%", "title": "return per bot"})
-        st.plotly_chart(fig, width="stretch")
+        combined = pd.concat(curves, axis=1).ffill().dropna()
+        c1, c2 = st.columns(2)
+        with c1:
+            if len(combined):
+                tot_s = combined.sum(axis=1)
+                fig_tot = go.Figure()
+                fig_tot.add_scatter(x=tot_s.index, y=tot_s, name="total portfolio equity", fill="tozeroy")
+                fig_tot.update_layout(height=360, margin={"t": 30, "b": 10}, title="Total portfolio equity",
+                                      yaxis={"title": bots[0].symbol.split("/")[1]})
+                st.plotly_chart(fig_tot, width="stretch")
+        with c2:
+            fig = go.Figure()
+            for name, eq in curves.items():
+                fig.add_scatter(x=eq.index, y=eq / eq.iloc[0] - 1, name=name)
+            fig.update_layout(height=360, margin={"t": 30, "b": 10}, title="Return per bot",
+                              legend={"orientation": "h"}, yaxis={"tickformat": ".1%"})
+            st.plotly_chart(fig, width="stretch")
+    if journals:
+        st.subheader("Recent trades (all bots)")
+        all_j = pd.concat(journals, ignore_index=True).sort_values("time", ascending=False)
+        st.dataframe(all_j.head(20), width="stretch", hide_index=True)
     st.caption("Each bot trades its own budget independently. Compare bots over months, not days: with ~1 trade per "
                "month per coin, short-term differences are mostly luck.")
 
@@ -199,13 +228,22 @@ def render_live(cfg: Config) -> None:
     start_eq = session.get("start_equity") or cfg.budget_quote
     risk = status["risk"]
     asset = status["symbol"].split("/")[0]
-    c = st.columns(5)
-    c[0].metric("Equity", f"{equity:,.2f}", f"{equity / start_eq - 1:+.2%} since start")
-    c[1].metric("Position value", f"{base * price:,.2f}", f"{base:.6f} {asset}", delta_color="off")
+    weight = status.get("entry_size_weight")
+    rvol = status.get("realized_vol")
+    entry_lvl, exit_lvl = status.get("entry_level"), status.get("exit_level")
+    c = st.columns(7)
+    c[0].metric("Equity", f"{equity:,.2f}", f"{equity - start_eq:+,.2f} ({equity / start_eq - 1:+.2%})")
+    c[1].metric("Position / cash", f"{base * price:,.2f}", f"{status['quote']:,.2f} cash ({base:.6f} {asset})", delta_color="off")
     c[2].metric(f"{status['symbol']} price", fmt_price(price))
+    c[3].metric("Buy trigger (breakout)", fmt_price(entry_lvl) if entry_lvl else "-",
+                f"{entry_lvl / price - 1:+.1%} from price" if entry_lvl and price else None, delta_color="off")
+    c[4].metric("Sell trigger (stop)", fmt_price(exit_lvl) if exit_lvl else "-",
+                f"{exit_lvl / price - 1:+.1%} from price" if exit_lvl and price else None, delta_color="off")
+    c[5].metric("Vol sizing weight", f"{weight:.0%}" if weight is not None else "-",
+                f"30d OHLC vol {rvol:.0%}" if rvol else None, delta_color="off")
     signal = {1.0: "LONG", 0.0: "FLAT"}.get(status["target"], "-")
-    c[3].metric("Signal / last action", signal, status["action"], delta_color="off")
-    c[4].metric("Trades today", f"{risk['trades_today']} / {cfg.max_trades_per_day}")
+    c[6].metric("Signal / trades today", f"{signal} ({status['action']})",
+                f"{risk['trades_today']} / {cfg.max_trades_per_day} today", delta_color="off")
 
     day_pnl = equity / risk["day_start_equity"] - 1 if risk["day_start_equity"] else 0.0
     dd = equity / risk["peak_equity"] - 1 if risk["peak_equity"] else 0.0

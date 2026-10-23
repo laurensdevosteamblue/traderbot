@@ -31,7 +31,9 @@ class RiskManager:
     def __init__(self, cfg: Config):
         self.cfg = cfg
         cfg.state_dir.mkdir(parents=True, exist_ok=True)
-        self.state_path = cfg.state_dir / "risk.json"
+        self.state_path = cfg.state_dir / f"risk_{cfg.mode}.json"
+        if not self.state_path.exists() and (cfg.state_dir / "risk.json").exists() and cfg.mode == "paper":
+            self.state_path = cfg.state_dir / "risk.json"
         self.kill_file = cfg.state_dir / "KILL"
         self.state = RiskState(**json.loads(self.state_path.read_text())) if self.state_path.exists() else RiskState()
 

@@ -1,15 +1,15 @@
 # Shared settings for all bots. Every [[bots]] entry at the bottom can override any of these keys.
 
 [market]
-exchange = "bitvavo"          # any ccxt exchange id; tested with bitvavo and binance
+exchange = "binance"          # any ccxt exchange id; tested with bitvavo and binance
 timeframe = "4h"
-operator_id = 1               # Bitvavo requires an integer "operatorId" on every order; any number you choose
+operator_id = 1               # Bitvavo requires an integer "operatorId" on every order; ignored on binance
 
 [costs]
-# Bitvavo taker fee at the lowest volume tier (< EUR 100k / 30 days) is 0.25%, plus a slippage estimate per side.
-fee = 0.0025                  # taker fee (market orders)
+# Binance spot fee at the base tier (VIP 0) is 0.10% maker / 0.10% taker (0.075% if paying with BNB).
+fee = 0.0010                  # taker fee (market orders)
 slippage = 0.0005
-maker_fee = 0.0015            # fee for limit orders that rest in the order book
+maker_fee = 0.0010            # fee for limit orders that rest in the order book
 
 [orders]
 # "limit": post a post-only limit order at the best bid/ask, wait limit_timeout_s, then send whatever is
@@ -30,11 +30,11 @@ max_trades_per_day = 6        # guards against runaway loops
 min_order_quote = 10.0        # Bitvavo minimum order is EUR 5
 
 [live]
-mode = "paper"                # paper | live  (testnet only exists for binance)
+mode = "live"                 # paper | live  (testnet only exists for binance)
 # Each bot's own budget. A bot only trades this money plus the coins it buys with it; everything else on the
 # account (your personal crypto and EUR, and the other bots' money) is ignored. Tracked per bot in
 # state/<name>/ledger_<mode>.json. In live mode the account needs (number of bots x budget) EUR free.
-budget_quote = 250.0
+budget_quote = 480.0
 state_dir = "state"           # each bot gets its own subfolder: state/<name>/
 data_dir = "data"
 

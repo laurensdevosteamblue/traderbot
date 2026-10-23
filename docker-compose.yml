@@ -12,7 +12,7 @@ x-common: &common
 services:
   bot:
     <<: *common
-    command: ["python", "-m", "traderbot", "run"]
+    command: ["python", "-m", "traderbot", "run", "--confirm-live"]
     # Only the bot gets secrets (.env). For mode = "live" add "--confirm-live" to the command.
     env_file:
       - path: .env
