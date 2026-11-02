@@ -61,8 +61,15 @@ class Runner:
         if killed:
             log.warning("[%s] kill switch active (%s); not trading", self.cfg.name, killed)
         target, self.weight = (None, None) if killed else self.signal(candles)
-        price = self.broker.price()
-        base, quote = self.broker.balances()
+        try:
+            price = self.broker.price()
+            base, quote = self.broker.balances()
+        except Exception:
+            if not killed:
+                raise
+            prev = json.loads(self.status.read_text()) if self.status.exists() else {}
+            price = float(prev.get("price") or 0.0)
+            base, quote = self.broker.ledger.base, self.broker.ledger.quote
         if not self.session.exists():
             self.session.write_text(json.dumps({"started": pd.Timestamp.now(tz="UTC").isoformat(),
                                                 "start_equity": quote + base * price, "strategy": self.cfg.strategy,
@@ -175,6 +182,9 @@ def step_all(runners: list[Runner], errors: dict[str, int]) -> dict[str, str]:
             r.alerts.send(f"[{name}] ERROR ({errors[name]}/{MAX_CONSECUTIVE_ERRORS}): {type(e).__name__}: {e}")
             if errors[name] >= MAX_CONSECUTIVE_ERRORS:
                 r.risk.trip(f"{errors[name]} consecutive errors, last: {e}")
+                prev = json.loads(r.status.read_text()) if r.status.exists() else {}
+                r._snapshot("killed", None, float(prev.get("price") or 0.0), r.broker.ledger.base,
+                            r.broker.ledger.quote)
                 r.alerts.send(f"[{name}] HALTED after repeated errors. Investigate, then run `resume --bot {name}`.")
                 errors[name] = 0
     return results

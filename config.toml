@@ -6,10 +6,10 @@ timeframe = "4h"
 operator_id = 1               # Bitvavo requires an integer "operatorId" on every order; ignored on binance
 
 [costs]
-# Binance spot fee at the base tier (VIP 0) is 0.10% maker / 0.10% taker (0.075% if paying with BNB).
-fee = 0.0010                  # taker fee (market orders)
+# Binance spot fee at the base tier (VIP 0) is 0.10%, or 0.075% when paying fees with BNB.
+fee = 0.00075                 # taker fee (market orders, with 25% BNB discount)
 slippage = 0.0005
-maker_fee = 0.0010            # fee for limit orders that rest in the order book
+maker_fee = 0.00075           # fee for limit orders that rest in the order book (with 25% BNB discount)
 
 [orders]
 # "limit": post a post-only limit order at the best bid/ask, wait limit_timeout_s, then send whatever is

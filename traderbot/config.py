@@ -56,7 +56,7 @@ def load_env(path: str | Path = ".env") -> None:
         line = line.strip()
         if line and not line.startswith("#") and "=" in line:
             key, value = line.split("=", 1)
-            os.environ.setdefault(key.strip(), value.strip().strip("'\""))
+            os.environ.setdefault(key.strip(), value.strip().strip("'\"").replace("\\n", "\n"))
 
 
 def load_bots(path: str | Path = "config.toml") -> list[Config]:

@@ -7,7 +7,8 @@ import pytest
 
 from traderbot.backtest import buy_and_hold, compare, run_backtest, walk_forward
 from traderbot.broker import ExchangeBroker, PaperBroker
-from traderbot.config import Config, load_bots, load_config
+from traderbot.config import Config, load_bots, load_config, load_env
+from traderbot.data import make_exchange
 from traderbot.live import Runner, state_paths, step_all
 from traderbot.overlays import blended_costs, realized_vol, regime_filter, size_at_entry, vol_target
 from traderbot.reconcile import expected_trades, reconcile
@@ -300,6 +301,8 @@ def test_step_all_isolates_failing_bot(tmp_path):
     for _ in range(4):
         step_all(runners, errors)
     assert runners[1].risk.killed() and not runners[0].risk.killed()  # only the failing bot halts
+    bad_status = json.loads(runners[1].status.read_text())
+    assert bad_status["action"] == "killed" and "exchange down" in bad_status["kill_switch"]
     assert step_all(runners, errors)["good"] == "hold"
 
 
@@ -525,3 +528,21 @@ def test_step_all_deduplicates_candle_fetches_and_guards_empty_candles(tmp_path)
                           RiskManager(cfg_for(tmp_path / "e", name="e")), Alerts())
     with pytest.raises(RuntimeError, match="no closed candles"):
         empty_runner.step()
+
+
+def test_load_env_and_make_exchange_support_pem_private_keys(tmp_path, monkeypatch):
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ed25519
+
+    priv = ed25519.Ed25519PrivateKey.generate()
+    pem = priv.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                             serialization.NoEncryption()).decode()
+    escaped = pem.strip().replace("\n", "\\n")
+    env_file = tmp_path / ".env"
+    env_file.write_text(f"TEST_PEM_SECRET='{escaped}'\n")
+    monkeypatch.delenv("TEST_PEM_SECRET", raising=False)
+    load_env(env_file)
+    ex = make_exchange("binance", api_key="test-key", secret=escaped)
+    signed = ex.sign("account", "private", "GET", {})
+    assert "signature=" in signed["url"]
+

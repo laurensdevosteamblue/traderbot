@@ -15,6 +15,8 @@ def make_exchange(exchange_id: str = "bitvavo", api_key: str | None = None, secr
     options = {"defaultType": "spot"}
     if operator_id is not None:
         options["operatorId"] = operator_id  # Bitvavo requires this on every order
+    if secret:
+        secret = secret.replace("\\n", "\n")
     ex = getattr(ccxt, exchange_id)({"apiKey": api_key, "secret": secret, "enableRateLimit": True,
                                      "options": options})
     if sandbox:
